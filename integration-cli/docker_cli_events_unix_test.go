@@ -17,8 +17,8 @@ import (
 	"github.com/creack/pty"
 	"github.com/docker/docker/integration-cli/cli/build"
 	"golang.org/x/sys/unix"
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"gotest.tools/v3/assert"
+	is "gotest.tools/v3/assert/cmp"
 )
 
 // #5979
@@ -243,7 +243,7 @@ func (s *DockerSuite) TestEventsContainerWithMultiNetwork(c *testing.T) {
 	assert.Assert(c, strings.Contains(netEvents[0], "disconnect"))
 	assert.Assert(c, strings.Contains(netEvents[1], "disconnect"))
 
-	//both networks appeared in the network event output
+	// both networks appeared in the network event output
 	assert.Assert(c, strings.Contains(out, "test-event-network-local-1"))
 	assert.Assert(c, strings.Contains(out, "test-event-network-local-2"))
 }

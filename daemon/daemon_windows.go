@@ -3,7 +3,9 @@ package daemon // import "github.com/docker/docker/daemon"
 import (
 	"context"
 	"fmt"
+	"math"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/Microsoft/hcsshim"
@@ -33,7 +35,6 @@ import (
 
 const (
 	isWindows            = true
-	defaultNetworkSpace  = "172.16.0.0/12"
 	platformSupported    = true
 	windowsMinCPUShares  = 1
 	windowsMaxCPUShares  = 10000
@@ -41,9 +42,10 @@ const (
 	windowsMaxCPUPercent = 100
 )
 
-// Windows doesn't really have rlimits.
+// Windows containers are much larger than Linux containers and each of them
+// have > 20 system processes which why we use much smaller parallelism value.
 func adjustParallelLimit(n int, limit int) int {
-	return limit
+	return int(math.Max(1, math.Floor(float64(runtime.NumCPU())*.8)))
 }
 
 // Windows has no concept of an execution state directory. So use config.Root here.
@@ -220,8 +222,7 @@ func verifyDaemonSettings(config *config.Config) error {
 func checkSystem() error {
 	// Validate the OS version. Note that dockerd.exe must be manifested for this
 	// call to return the correct version.
-	osv := system.GetOSVersion()
-	if osv.MajorVersion < 10 {
+	if osversion.Get().MajorVersion < 10 {
 		return fmt.Errorf("This version of Windows does not support the docker daemon")
 	}
 	if osversion.Build() < osversion.RS1 {
@@ -424,15 +425,19 @@ func initBridgeDriver(controller libnetwork.NetworkController, config *config.Co
 		winlibnetwork.NetworkName: runconfig.DefaultDaemonNetworkMode().NetworkName(),
 	}
 
-	subnetPrefix := defaultNetworkSpace
+	var ipamOption libnetwork.NetworkOption
+	var subnetPrefix string
+
 	if config.BridgeConfig.FixedCIDR != "" {
 		subnetPrefix = config.BridgeConfig.FixedCIDR
 	}
 
-	ipamV4Conf := libnetwork.IpamConf{PreferredPool: subnetPrefix}
-	v4Conf := []*libnetwork.IpamConf{&ipamV4Conf}
-	v6Conf := []*libnetwork.IpamConf{}
-	ipamOption := libnetwork.NetworkOptionIpam("default", "", v4Conf, v6Conf, nil)
+	if subnetPrefix != "" {
+		ipamV4Conf := libnetwork.IpamConf{PreferredPool: subnetPrefix}
+		v4Conf := []*libnetwork.IpamConf{&ipamV4Conf}
+		v6Conf := []*libnetwork.IpamConf{}
+		ipamOption = libnetwork.NetworkOptionIpam("default", "", v4Conf, v6Conf, nil)
+	}
 
 	_, err := controller.NewNetwork(string(runconfig.DefaultDaemonNetworkMode()), runconfig.DefaultDaemonNetworkMode().NetworkName(), "",
 		libnetwork.NetworkOptionGeneric(options.Generic{
@@ -647,4 +652,8 @@ func (daemon *Daemon) initRuntimes(_ map[string]types.Runtime) error {
 }
 
 func setupResolvConf(config *config.Config) {
+}
+
+func (daemon *Daemon) useShimV2() bool {
+	return true
 }

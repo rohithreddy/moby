@@ -8,9 +8,9 @@ import (
 
 	"github.com/docker/docker/api/types/registry"
 	"github.com/docker/docker/testutil/daemon"
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
-	"gotest.tools/skip"
+	"gotest.tools/v3/assert"
+	is "gotest.tools/v3/assert/cmp"
+	"gotest.tools/v3/skip"
 )
 
 func TestInfoAPI(t *testing.T) {
@@ -91,6 +91,7 @@ func TestInfoDebug(t *testing.T) {
 
 func TestInfoInsecureRegistries(t *testing.T) {
 	skip.If(t, testEnv.IsRemoteDaemon, "cannot run daemon when remote daemon")
+	skip.If(t, testEnv.DaemonInfo.OSType == "windows", "FIXME: test starts daemon with -H unix://.....")
 
 	const (
 		registryCIDR = "192.168.1.0/24"
@@ -115,6 +116,7 @@ func TestInfoInsecureRegistries(t *testing.T) {
 
 func TestInfoRegistryMirrors(t *testing.T) {
 	skip.If(t, testEnv.IsRemoteDaemon, "cannot run daemon when remote daemon")
+	skip.If(t, testEnv.DaemonInfo.OSType == "windows", "FIXME: test starts daemon with -H unix://.....")
 
 	const (
 		registryMirror1 = "https://192.168.1.2"

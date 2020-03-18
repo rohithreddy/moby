@@ -33,6 +33,7 @@ func (c *Cluster) Init(req types.InitRequest) (string, error) {
 			// API handlers to finish before shutting down the node.
 			c.mu.Lock()
 			if !c.nr.nodeState.IsManager() {
+				c.mu.Unlock()
 				return "", errSwarmNotManager
 			}
 			c.mu.Unlock()
@@ -93,7 +94,6 @@ func (c *Cluster) Init(req types.InitRequest) (string, error) {
 		}
 	}
 
-	//Validate Default Address Pool input
 	if err := validateDefaultAddrPool(req.DefaultAddrPool, req.SubnetSize); err != nil {
 		return "", err
 	}

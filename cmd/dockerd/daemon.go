@@ -85,6 +85,7 @@ func (cli *DaemonCli) start(opts *daemonOptions) (err error) {
 	if cli.Config, err = loadDaemonCliConfig(opts); err != nil {
 		return err
 	}
+	warnOnDeprecatedConfigOptions(cli.Config)
 
 	if err := configureDaemonLogs(cli.Config); err != nil {
 		return err
@@ -326,19 +327,6 @@ func (cli *DaemonCli) reloadConfig() {
 		}
 		cli.authzMiddleware.SetPlugins(c.AuthorizationPlugins)
 
-		// The namespaces com.docker.*, io.docker.*, org.dockerproject.* have been documented
-		// to be reserved for Docker's internal use, but this was never enforced.  Allowing
-		// configured labels to use these namespaces are deprecated for 18.05.
-		//
-		// The following will check the usage of such labels, and report a warning for deprecation.
-		//
-		// TODO: At the next stable release, the validation should be folded into the other
-		// configuration validation functions and an error will be returned instead, and this
-		// block should be deleted.
-		if err := config.ValidateReservedNamespaceLabels(c.Labels); err != nil {
-			logrus.Warnf("Configured labels using reserved namespaces is deprecated: %s", err)
-		}
-
 		if err := cli.d.Reload(c); err != nil {
 			logrus.Errorf("Error reconfiguring the daemon: %v", err)
 			return
@@ -446,18 +434,6 @@ func loadDaemonCliConfig(opts *daemonOptions) (*config.Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	// The namespaces com.docker.*, io.docker.*, org.dockerproject.* have been documented
-	// to be reserved for Docker's internal use, but this was never enforced.  Allowing
-	// configured labels to use these namespaces are deprecated for 18.05.
-	//
-	// The following will check the usage of such labels, and report a warning for deprecation.
-	//
-	// TODO: At the next stable release, the validation should be folded into the other
-	// configuration validation functions and an error will be returned instead, and this
-	// block should be deleted.
-	if err := config.ValidateReservedNamespaceLabels(newLabels); err != nil {
-		logrus.Warnf("Configured labels using reserved namespaces is deprecated: %s", err)
-	}
 	conf.Labels = newLabels
 
 	// Regardless of whether the user sets it to true or false, if they
@@ -467,6 +443,18 @@ func loadDaemonCliConfig(opts *daemonOptions) (*config.Config, error) {
 	}
 
 	return conf, nil
+}
+
+func warnOnDeprecatedConfigOptions(config *config.Config) {
+	if config.ClusterAdvertise != "" {
+		logrus.Warn(`The "cluster-advertise" option is deprecated. To be removed soon.`)
+	}
+	if config.ClusterStore != "" {
+		logrus.Warn(`The "cluster-store" option is deprecated. To be removed soon.`)
+	}
+	if len(config.ClusterOpts) > 0 {
+		logrus.Warn(`The "cluster-store-opt" option is deprecated. To be removed soon.`)
+	}
 }
 
 func initRouter(opts routerOptions) {

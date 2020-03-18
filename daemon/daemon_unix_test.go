@@ -15,8 +15,8 @@ import (
 	"github.com/docker/docker/daemon/config"
 	"github.com/docker/docker/pkg/sysinfo"
 	"golang.org/x/sys/unix"
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"gotest.tools/v3/assert"
+	is "gotest.tools/v3/assert/cmp"
 )
 
 type fakeContainerGetter struct {
@@ -68,6 +68,7 @@ func TestAdjustCPUShares(t *testing.T) {
 		repository: tmp,
 		root:       tmp,
 	}
+	muteLogs()
 
 	hostConfig := &containertypes.HostConfig{
 		Resources: containertypes.Resources{CPUShares: linuxMinCPUShares - 1},

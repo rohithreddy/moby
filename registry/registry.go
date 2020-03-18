@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/docker/distribution/registry/client/transport"
+	"github.com/docker/docker/pkg/homedir"
+	"github.com/docker/docker/rootless"
 	"github.com/docker/go-connections/tlsconfig"
 	"github.com/sirupsen/logrus"
 )
@@ -31,7 +33,19 @@ func newTLSConfig(hostname string, isSecure bool) (*tls.Config, error) {
 	tlsConfig.InsecureSkipVerify = !isSecure
 
 	if isSecure && CertsDir != "" {
-		hostDir := filepath.Join(CertsDir, cleanPath(hostname))
+		certsDir := CertsDir
+
+		if rootless.RunningWithRootlessKit() {
+			configHome, err := homedir.GetConfigHome()
+			if err != nil {
+				return nil, err
+			}
+
+			certsDir = filepath.Join(configHome, "docker/certs.d")
+		}
+
+		hostDir := filepath.Join(certsDir, cleanPath(hostname))
+
 		logrus.Debugf("hostDir: %s", hostDir)
 		if err := ReadCertsDirectory(tlsConfig, hostDir); err != nil {
 			return nil, err

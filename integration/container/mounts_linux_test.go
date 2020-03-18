@@ -16,11 +16,11 @@ import (
 	"github.com/docker/docker/integration/internal/container"
 	"github.com/docker/docker/pkg/mount"
 	"github.com/docker/docker/pkg/system"
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
-	"gotest.tools/fs"
-	"gotest.tools/poll"
-	"gotest.tools/skip"
+	"gotest.tools/v3/assert"
+	is "gotest.tools/v3/assert/cmp"
+	"gotest.tools/v3/fs"
+	"gotest.tools/v3/poll"
+	"gotest.tools/v3/skip"
 )
 
 func TestContainerNetworkMountsNoChown(t *testing.T) {
@@ -214,6 +214,7 @@ func TestMountDaemonRoot(t *testing.T) {
 func TestContainerBindMountNonRecursive(t *testing.T) {
 	skip.If(t, testEnv.IsRemoteDaemon)
 	skip.If(t, versions.LessThan(testEnv.DaemonAPIVersion(), "1.40"), "BindOptions.NonRecursive requires API v1.40")
+	skip.If(t, testEnv.IsRootless, "cannot be tested because RootlessKit executes the daemon in private mount namespace (https://github.com/rootless-containers/rootlesskit/issues/97)")
 
 	defer setupTest(t)()
 

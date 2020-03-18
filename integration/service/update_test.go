@@ -9,10 +9,10 @@ import (
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/integration/internal/network"
 	"github.com/docker/docker/integration/internal/swarm"
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
-	"gotest.tools/poll"
-	"gotest.tools/skip"
+	"gotest.tools/v3/assert"
+	is "gotest.tools/v3/assert/cmp"
+	"gotest.tools/v3/poll"
+	"gotest.tools/v3/skip"
 )
 
 func TestServiceUpdateLabel(t *testing.T) {
@@ -227,7 +227,7 @@ func TestServiceUpdateNetwork(t *testing.T) {
 	assert.NilError(t, err)
 	assert.Assert(t, len(netInfo.Containers) == 2, "Expected 2 endpoints, one for container and one for LB Sandbox")
 
-	//Remove network from service
+	// Remove network from service
 	service.Spec.TaskTemplate.Networks = []swarmtypes.NetworkAttachmentConfig{}
 	_, err = cli.ServiceUpdate(ctx, serviceID, service.Version, service.Spec, types.ServiceUpdateOptions{})
 	assert.NilError(t, err)

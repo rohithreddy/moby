@@ -23,12 +23,12 @@ import (
 	"github.com/moby/buildkit/cache"
 	"github.com/moby/buildkit/cache/metadata"
 	"github.com/moby/buildkit/client"
+	"github.com/moby/buildkit/client/llb"
 	"github.com/moby/buildkit/executor"
 	"github.com/moby/buildkit/exporter"
 	localexporter "github.com/moby/buildkit/exporter/local"
 	tarexporter "github.com/moby/buildkit/exporter/tar"
 	"github.com/moby/buildkit/frontend"
-	gw "github.com/moby/buildkit/frontend/gateway/client"
 	"github.com/moby/buildkit/session"
 	"github.com/moby/buildkit/snapshot"
 	"github.com/moby/buildkit/solver"
@@ -38,6 +38,7 @@ import (
 	"github.com/moby/buildkit/source/git"
 	"github.com/moby/buildkit/source/http"
 	"github.com/moby/buildkit/source/local"
+	"github.com/moby/buildkit/util/binfmt_misc"
 	"github.com/moby/buildkit/util/contentutil"
 	"github.com/moby/buildkit/util/progress"
 	digest "github.com/opencontainers/go-digest"
@@ -139,7 +140,19 @@ func (w *Worker) Labels() map[string]string {
 }
 
 // Platforms returns one or more platforms supported by the image.
-func (w *Worker) Platforms() []ocispec.Platform {
+func (w *Worker) Platforms(noCache bool) []ocispec.Platform {
+	if noCache {
+		pm := make(map[string]struct{}, len(w.Opt.Platforms))
+		for _, p := range w.Opt.Platforms {
+			pm[platforms.Format(p)] = struct{}{}
+		}
+		for _, p := range binfmt_misc.SupportedPlatforms(noCache) {
+			if _, ok := pm[p]; !ok {
+				pp, _ := platforms.Parse(p)
+				w.Opt.Platforms = append(w.Opt.Platforms, pp)
+			}
+		}
+	}
 	if len(w.Opt.Platforms) == 0 {
 		return []ocispec.Platform{platforms.DefaultSpec()}
 	}
@@ -183,7 +196,7 @@ func (w *Worker) ResolveOp(v solver.Vertex, s frontend.FrontendLLBBridge, sm *se
 }
 
 // ResolveImageConfig returns image config for an image
-func (w *Worker) ResolveImageConfig(ctx context.Context, ref string, opt gw.ResolveImageConfigOpt, sm *session.Manager) (digest.Digest, []byte, error) {
+func (w *Worker) ResolveImageConfig(ctx context.Context, ref string, opt llb.ResolveImageConfigOpt, sm *session.Manager) (digest.Digest, []byte, error) {
 	// ImageSource is typically source/containerimage
 	resolveImageConfig, ok := w.ImageSource.(resolveImageConfig)
 	if !ok {
@@ -305,6 +318,23 @@ func (w *Worker) PruneCacheMounts(ctx context.Context, ids []string) error {
 	return nil
 }
 
+func (w *Worker) getRef(ctx context.Context, diffIDs []layer.DiffID, opts ...cache.RefOption) (cache.ImmutableRef, error) {
+	var parent cache.ImmutableRef
+	if len(diffIDs) > 1 {
+		var err error
+		parent, err = w.getRef(ctx, diffIDs[:len(diffIDs)-1], opts...)
+		if err != nil {
+			return nil, err
+		}
+		defer parent.Release(context.TODO())
+	}
+	return w.CacheManager.GetByBlob(context.TODO(), ocispec.Descriptor{
+		Annotations: map[string]string{
+			"containerd.io/uncompressed": diffIDs[len(diffIDs)-1].String(),
+		},
+	}, parent, opts...)
+}
+
 // FromRemote converts a remote snapshot reference to a local one
 func (w *Worker) FromRemote(ctx context.Context, remote *solver.Remote) (cache.ImmutableRef, error) {
 	rootfs, err := getLayers(ctx, remote.Descriptors)
@@ -353,7 +383,7 @@ func (w *Worker) FromRemote(ctx context.Context, remote *solver.Remote) (cache.I
 		if v, ok := remote.Descriptors[i].Annotations["buildkit/description"]; ok {
 			descr = v
 		}
-		ref, err := w.CacheManager.GetFromSnapshotter(ctx, string(layer.CreateChainID(rootFS.DiffIDs[:i+1])), cache.WithDescription(descr), cache.WithCreationTime(tm))
+		ref, err := w.getRef(ctx, rootFS.DiffIDs[:i+1], cache.WithDescription(descr), cache.WithCreationTime(tm))
 		if err != nil {
 			return nil, err
 		}
@@ -460,7 +490,7 @@ func oneOffProgress(ctx context.Context, id string) func(err error) error {
 }
 
 type resolveImageConfig interface {
-	ResolveImageConfig(ctx context.Context, ref string, opt gw.ResolveImageConfigOpt, sm *session.Manager) (digest.Digest, []byte, error)
+	ResolveImageConfig(ctx context.Context, ref string, opt llb.ResolveImageConfigOpt, sm *session.Manager) (digest.Digest, []byte, error)
 }
 
 type emptyProvider struct {

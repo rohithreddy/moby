@@ -364,10 +364,15 @@ func (daemon *Daemon) adaptContainerSettings(hostConfig *containertypes.HostConf
 
 	// Set default cgroup namespace mode, if unset for container
 	if hostConfig.CgroupnsMode.IsEmpty() {
-		if hostConfig.Privileged {
+		// for cgroup v2: unshare cgroupns even for privileged containers
+		// https://github.com/containers/libpod/pull/4374#issuecomment-549776387
+		if hostConfig.Privileged && !cgroups.IsCgroup2UnifiedMode() {
 			hostConfig.CgroupnsMode = containertypes.CgroupnsMode("host")
 		} else {
-			m := config.DefaultCgroupNamespaceMode
+			m := "host"
+			if cgroups.IsCgroup2UnifiedMode() {
+				m = "private"
+			}
 			if daemon.configStore != nil {
 				m = daemon.configStore.CgroupNamespaceMode
 			}
@@ -594,15 +599,13 @@ func verifyPlatformContainerResources(resources *containertypes.Resources, sysIn
 }
 
 func (daemon *Daemon) getCgroupDriver() string {
+	if UsingSystemd(daemon.configStore) {
+		return cgroupSystemdDriver
+	}
 	if daemon.Rootless() {
 		return cgroupNoneDriver
 	}
-	cgroupDriver := cgroupFsDriver
-
-	if UsingSystemd(daemon.configStore) {
-		cgroupDriver = cgroupSystemdDriver
-	}
-	return cgroupDriver
+	return cgroupFsDriver
 }
 
 // getCD gets the raw value of the native.cgroupdriver option, if set.
@@ -708,8 +711,8 @@ func verifyPlatformContainerSettings(daemon *Daemon, hostConfig *containertypes.
 			warnings = append(warnings, "Your kernel does not support cgroup namespaces.  Cgroup namespace setting discarded.")
 		}
 
-		if hostConfig.Privileged {
-			return warnings, fmt.Errorf("privileged mode is incompatible with private cgroup namespaces.  You must run the container in the host cgroup namespace when running privileged mode")
+		if hostConfig.Privileged && !cgroups.IsCgroup2UnifiedMode() {
+			return warnings, fmt.Errorf("privileged mode is incompatible with private cgroup namespaces on cgroup v1 host.  You must run the container in the host cgroup namespace when running privileged mode")
 		}
 	}
 
@@ -786,6 +789,10 @@ func verifyDaemonSettings(conf *config.Config) error {
 		if len(conf.CgroupParent) <= 6 || !strings.HasSuffix(conf.CgroupParent, ".slice") {
 			return fmt.Errorf("cgroup-parent for systemd cgroup should be a valid slice named as \"xxx.slice\"")
 		}
+	}
+
+	if conf.Rootless && UsingSystemd(conf) && !cgroups.IsCgroup2UnifiedMode() {
+		return fmt.Errorf("exec-opt native.cgroupdriver=systemd requires cgroup v2 for rootless mode")
 	}
 
 	if conf.DefaultRuntime == "" {
@@ -927,6 +934,19 @@ func (daemon *Daemon) initNetworkController(config *config.Config, activeSandbox
 		removeDefaultBridgeInterface()
 	}
 
+	// Set HostGatewayIP to the default bridge's IP  if it is empty
+	if daemon.configStore.HostGatewayIP == nil && controller != nil {
+		if n, err := controller.NetworkByName("bridge"); err == nil {
+			v4Info, v6Info := n.Info().IpamInfo()
+			var gateway net.IP
+			if len(v4Info) > 0 {
+				gateway = v4Info[0].Gateway.IP
+			} else if len(v6Info) > 0 {
+				gateway = v6Info[0].Gateway.IP
+			}
+			daemon.configStore.HostGatewayIP = gateway
+		}
+	}
 	return controller, nil
 }
 
@@ -990,11 +1010,11 @@ func initBridgeDriver(controller libnetwork.NetworkController, config *config.Co
 	}
 
 	if config.BridgeConfig.IP != "" {
-		ipamV4Conf.PreferredPool = config.BridgeConfig.IP
-		ip, _, err := net.ParseCIDR(config.BridgeConfig.IP)
+		ip, ipNet, err := net.ParseCIDR(config.BridgeConfig.IP)
 		if err != nil {
 			return err
 		}
+		ipamV4Conf.PreferredPool = ipNet.String()
 		ipamV4Conf.Gateway = ip.String()
 	} else if bridgeName == bridge.DefaultBridgeName && ipamV4Conf.PreferredPool != "" {
 		logrus.Infof("Default bridge (%s) is assigned with an IP address %s. Daemon option --bip can be used to set a preferred IP address", bridgeName, ipamV4Conf.PreferredPool)
@@ -1018,7 +1038,9 @@ func initBridgeDriver(controller libnetwork.NetworkController, config *config.Co
 		ipamV6Conf     *libnetwork.IpamConf
 	)
 
-	if config.BridgeConfig.FixedCIDRv6 != "" {
+	if config.BridgeConfig.EnableIPv6 && config.BridgeConfig.FixedCIDRv6 == "" {
+		return errdefs.InvalidParameter(errors.New("IPv6 is enabled for the default bridge, but no subnet is configured. Specify an IPv6 subnet using --fixed-cidr-v6"))
+	} else if config.BridgeConfig.FixedCIDRv6 != "" {
 		_, fCIDRv6, err := net.ParseCIDR(config.BridgeConfig.FixedCIDRv6)
 		if err != nil {
 			return err
@@ -1594,6 +1616,10 @@ func (daemon *Daemon) initCgroupsPath(path string) error {
 		return nil
 	}
 
+	if cgroups.IsCgroup2UnifiedMode() {
+		return fmt.Errorf("daemon-scoped cpu-rt-period and cpu-rt-runtime are not implemented for cgroup v2")
+	}
+
 	// Recursively create cgroup to ensure that the system and all parent cgroups have values set
 	// for the period and runtime as this limits what the children can be set to.
 	daemon.initCgroupsPath(filepath.Dir(path))
@@ -1638,4 +1664,8 @@ func (daemon *Daemon) setupSeccompProfile() error {
 		daemon.seccompProfile = b
 	}
 	return nil
+}
+
+func (daemon *Daemon) useShimV2() bool {
+	return cgroups.IsCgroup2UnifiedMode()
 }
